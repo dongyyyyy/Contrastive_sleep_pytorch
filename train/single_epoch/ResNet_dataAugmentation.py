@@ -14,25 +14,26 @@ from utils.function.scheduler import *
 def train_ResNet_dataAugmentation(save_filename,logging_filename, train_dataset_list,val_dataset_list,test_dataset_list,batch_size = 10000,
                                                  epochs=2000,learning_rate=0.001,use_scaling=False,scaling=1e+6,
                                           optim='Adam',loss_function='CE',epsilon=0.7,noise_scale=2e-6,
-                                          use_noise=True,preprocessing=False,preprocessing_methods='Standard',use_channel=[0,1,2],scheduler=None,
+                                          use_noise=True,preprocessing=False,preprocessing_methods=['crop','permute'],use_channel=[0,1,2],scheduler=None,
                                           warmup_iter=20,cosine_decay_iter=40,stop_iter=300,gamma=0.8,
-                                          class_num=5,classification_mode='5class',gpu_num=0):
+                                          class_num=5,classification_mode='5class',gpu_num=0,blocks=BasicBlock,block_num=[3,4,6,3],block_channel=[64,128,256,512],first_conv=[49,10,24],
+                                          block_kernel_size=9):
     # cpu processor num
     cpu_num = multiprocessing.cpu_count()
 
     train_dataset = Sleep_Dataset_cnn_withPath(dataset_list=train_dataset_list,class_num=class_num,
-    use_channel=use_channel,use_cuda = True,preprocessing=True,
-                 epsilon = 0.5,preprocessing_method = ['permute','crop'],permute_size=200,crop_size=1000,cutout_size=1000,classification_mode=classification_mode,loader_mode = 'train')
+                    use_channel=use_channel,use_cuda = True,preprocessing=preprocessing,
+                 epsilon = 0.5,preprocessing_method = preprocessing_methods,permute_size=200,crop_size=4000,cutout_size=1000,classification_mode=classification_mode,loader_mode = 'train')
     
     val_dataset = Sleep_Dataset_cnn_withPath(dataset_list=val_dataset_list,class_num=class_num,
-    use_channel=use_channel,use_cuda = True,preprocessing=False,
-                 epsilon = 0.5,preprocessing_method = ['permute','crop'],permute_size=200,crop_size=1000,cutout_size=1000,classification_mode=classification_mode,loader_mode = 'val')
+                    use_channel=use_channel,use_cuda = True,preprocessing=False,
+                 epsilon = 0.5,preprocessing_method = preprocessing_methods,permute_size=200,crop_size=4000,cutout_size=1000,classification_mode=classification_mode,loader_mode = 'val')
 
     test_dataset = Sleep_Dataset_cnn_withPath(dataset_list=test_dataset_list,class_num=class_num,
-    use_channel=use_channel,use_cuda = True,preprocessing=False,
-                 epsilon = 0.5,preprocessing_method = ['permute','crop'],permute_size=200,crop_size=1000,cutout_size=1000,classification_mode=classification_mode,loader_mode = 'test')
+                    use_channel=use_channel,use_cuda = True,preprocessing=False,
+                 epsilon = 0.5,preprocessing_method = preprocessing_methods,permute_size=200,crop_size=4000,cutout_size=1000,classification_mode=classification_mode,loader_mode = 'test')
 
-    
+
 
     weights,count = make_weights_for_balanced_classes(train_dataset.signals_files_path)
     # print(f'weights : {weights} / count : {count}')
@@ -68,8 +69,8 @@ def train_ResNet_dataAugmentation(save_filename,logging_filename, train_dataset_
     best_epoch = 0
 
 
-    model = ResNet_200hz(block=Bottleneck,layers=[3,4,6,3], first_conv=[49,10,24],maxpool=[9,4,4], layer_filters=[64,128,256,512], in_channel=len(use_channel),
-                    block_kernel_size=9,block_stride_size=2, num_classes=class_num, use_batchnorm=True, zero_init_residual=False,
+    model = ResNet_200hz(block=blocks,layers=block_num, first_conv=first_conv,maxpool=[9,4,4], layer_filters=block_channel, in_channel=len(use_channel),
+                    block_kernel_size=block_kernel_size,block_stride_size=2, num_classes=class_num, use_batchnorm=True, zero_init_residual=False,
                     groups=1, width_per_group=64, replace_stride_with_dilation=None,
                     norm_layer=None,dropout_p=0.)
 
@@ -93,7 +94,7 @@ def train_ResNet_dataAugmentation(save_filename,logging_filename, train_dataset_
 
     if torch.cuda.device_count() > 1:
         print('Multi GPU Activation !!!', torch.cuda.device_count())
-        # model = nn.DataParallel(model,device_ids=gpu_num)
+        model = nn.DataParallel(model,device_ids=gpu_num)
         # model = nn.DataParallel(model,device_ids=gpu_num)
             # model.to(f'cuda:{model.device_ids[0]}')
 
@@ -355,7 +356,9 @@ def train_ResNet_dataAugmentation(save_filename,logging_filename, train_dataset_
 
 
 
-def training_ResNet_dataAugmentation(use_channel=[0,1],classification_mode='5class',use_dataset='SeouUniv',gpu_num=[0]):
+def training_ResNet_dataAugmentation(blocks = Bottleneck,block_num = [3,4,6,3],block_channel = [64,128,128,256],first_conv = [49,10,24],block_kernel_size = 9,
+                                    preprocessing=False,preprocessing_methods=['crop','permute'],
+                                    use_channel=[0,1],classification_mode='5class',use_dataset='SeouUniv',gpu_num=[0]):
     # signals_path = '/home/eslab/dataset/seoulDataset/7channel_prefilter_butter_minmax_-1_1/signals_dataloader/'
     seoul_signals_path = '/home/eslab/dataset/seoulDataset/4EEG_2EOG_1EMG_ECG_Flow_Abdomen/signals_dataloader_standard_each_200hz/'
     hallym_signals_path = '/home/eslab/dataset/hallymDataset/4EEG_2EOG_1EMG_ECG_Flow_Abdomen/signals_dataloader_standard_each_200hz/'
@@ -462,8 +465,9 @@ def training_ResNet_dataAugmentation(use_channel=[0,1],classification_mode='5cla
     epochs = 100
     batch_size = 512
 
-    preprocessing=False
-    preprocessing_methods = 'Standard'
+    # preprocessing=True
+    # preprocessing_methods = ['cutout','permute']
+
 
     # learning_rate = 0.0001
     stop_iter = 5
@@ -478,17 +482,16 @@ def training_ResNet_dataAugmentation(use_channel=[0,1],classification_mode='5cla
     else:
         class_num = 3
     
-    
-    model_save_path = f'/mnt/hdd3/Contrastive_Sleep/saved_model/11_01/SupervisedLearning/DataAugmentation/resnet18_8_1_1_imageFormat/'
-    logging_save_path = f'/mnt/hdd3/Contrastive_Sleep/log/11_01/SupervisedLearning/DataAugmentation/resnet18_8_1_1_imageFormat/'
+    model_save_path = f'/data/hdd3/Contrastive_Sleep/saved_model/11_01/SupervisedLearning/DataAugmentation/resnet_8_1_1_imageFormat/{blocks}_{block_num}_{block_channel}_{block_kernel_size}/{preprocessing}_{preprocessing_methods}/'
+    logging_save_path = f'/data/hdd3/Contrastive_Sleep/log/11_01/SupervisedLearning/DataAugmentation/resnet_8_1_1_imageFormat/{blocks}_{block_num}_{block_channel}_{block_kernel_size}/{preprocessing}_{preprocessing_methods}/'
     os.makedirs(model_save_path,exist_ok=True)
     os.makedirs(logging_save_path,exist_ok=True)
     if optim == 'SGD':
         learning_rate = 0.1
     if optim == 'Adam':
         learning_rate = 0.0001
-    save_filename = model_save_path + f'resnet18_5classes_Adam_{use_channel}_{use_dataset}.pth'
-    logging_filename = logging_save_path + f'resnet18_5classes_Adam_{use_channel}_{use_dataset}.txt'
+    save_filename = model_save_path + f'resnet_5classes_Adam_{use_channel}_{use_dataset}_{first_conv}.pth'
+    logging_filename = logging_save_path + f'resnet_5classes_Adam_{use_channel}_{use_dataset}_{first_conv}.txt'
 
 
     print('save filename : ',save_filename)
@@ -498,5 +501,6 @@ def training_ResNet_dataAugmentation(use_channel=[0,1],classification_mode='5cla
                                                         test_dataset_list=test_fold_list,epochs=epochs,batch_size=batch_size,learning_rate=learning_rate,
                                                         optim=optim,loss_function=loss_function,epsilon=epsilon,noise_scale=noise_scale,class_num = class_num,
                                                         use_noise=use_noise,preprocessing=preprocessing,preprocessing_methods=preprocessing_methods,scheduler=scheduler,stop_iter=stop_iter,use_channel=use_channel,
-                                                        classification_mode=classification_mode,gpu_num=gpu_num)
+                                                        classification_mode=classification_mode,gpu_num=gpu_num,blocks=blocks,block_num=block_num,block_channel=block_channel,
+                                                        first_conv=first_conv,block_kernel_size=block_kernel_size)
 

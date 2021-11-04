@@ -121,6 +121,84 @@ class Sleep_Dataset_cnn_withPath(object):
     def __len__(self):
         return self.length 
 
+class Sleep_Dataset_cnn_withPath_withoutAugmentation(object):
+    def read_dataset(self):
+        all_signals_files = []
+        all_labels = []
+
+        for dataset_folder in self.dataset_list:
+            signals_path = dataset_folder
+            signals_list = os.listdir(signals_path)
+            signals_list.sort()
+            for signals_filename in signals_list:
+                signals_file = signals_path+signals_filename
+                all_signals_files.append(signals_file)
+                all_labels.append(int(signals_filename.split('.npy')[0].split('_')[-1]))
+                
+        return all_signals_files, all_labels, len(all_signals_files)
+
+    def __init__(self,
+                 dataset_list,
+                 class_num=5,
+                 use_channel=[0,1,2],
+                 use_cuda = True,
+                 sample_rate=200,
+                 epoch_size=30,
+                 classification_mode='5class',
+                 ):
+        self.class_num = class_num
+        self.dataset_list = dataset_list
+        self.signals_files_path, self.labels, self.length = self.read_dataset()
+
+
+        self.use_channel = use_channel
+        self.use_cuda = use_cuda
+
+        self.classification_mode = classification_mode
+        print('classification_mode : ',classification_mode)
+
+
+    def __getitem__(self, index):
+
+        # current file index
+
+        labels = int(self.labels[index])
+
+        if self.classification_mode == 'REM-NoneREM':
+            if labels == 0: # Wake
+                labels = 0
+            elif labels == 4: #REM
+                labels = 2
+            else: # None-REM
+                labels = 1
+
+        elif self.classification_mode == 'LS-DS':
+            if labels == 0:
+                labels = 0
+            elif labels == 1 or labels == 2:
+                labels = 1
+            else:
+                labels = 2
+        signals = None
+        count = 0
+        
+        signals = np.load(self.signals_files_path[index])
+        signals = signals[self.use_channel,:]
+        
+
+        # for i in range(self.seq_size):
+        #     print(np.array_equal(signals[:,i*self.stride:(i*self.stride)+self.window_size],input_signals[i]))              
+
+        signals = np.array(signals)
+        
+        if self.use_cuda:
+            signals = torch.from_numpy(signals).float()
+        
+        return signals,labels
+        
+    def __len__(self):
+        return self.length 
+
 class Sleep_Dataset_cnn_window_withPath(object):
     def read_dataset(self):
         all_signals_files = []
@@ -541,6 +619,118 @@ class Sleep_Dataset_cnn_window_sequence_withPath(object):
             count += 1
         
         return signals,labels
+        
+    def __len__(self):
+        return self.length 
+
+class Sleep_Dataset_cnn_withPath_forContrastiveLearning(object):
+    def read_dataset(self):
+        all_signals_files = []
+        all_labels = []
+
+        for dataset_folder in self.dataset_list:
+            signals_path = dataset_folder
+            signals_list = os.listdir(signals_path)
+            signals_list.sort()
+            for signals_filename in signals_list:
+                signals_file = signals_path+signals_filename
+                all_signals_files.append(signals_file)
+                all_labels.append(int(signals_filename.split('.npy')[0].split('_')[-1]))
+                
+        return all_signals_files, all_labels, len(all_signals_files)
+
+    def __init__(self,
+                 dataset_list,
+                 class_num=5,
+                 use_channel=[0,1,2],
+                 use_cuda = True,
+                 sample_rate=200,
+                 epoch_size=30,
+                 preprocessing=False,
+                 epsilon = 0.5,
+                 preprocessing_method = ['permute','crop'],
+                 permute_size=200,
+                 crop_size=1000,
+                 cutout_size=1000,
+                 classification_mode='5class',
+                 loader_mode = 'train'
+                 ):
+        self.class_num = class_num
+        self.dataset_list = dataset_list
+        self.signals_files_path, self.labels, self.length = self.read_dataset()
+
+
+        self.use_channel = use_channel
+        self.use_cuda = use_cuda
+
+        self.preprocessing = preprocessing
+        self.epsilon = epsilon
+        self.preprocessing_method = preprocessing_method
+        self.Transform = Transform()
+        self.permute_size = permute_size
+        self.crop_size = crop_size
+        self.cutout_size = cutout_size
+        self.loader_mode = loader_mode
+        self.classification_mode = classification_mode
+        print('classification_mode : ',classification_mode)
+
+
+    def __getitem__(self, index):
+
+        # current file index
+
+        labels = int(self.labels[index])
+
+        if self.classification_mode == 'REM-NoneREM':
+            if labels == 0: # Wake
+                labels = 0
+            elif labels == 4: #REM
+                labels = 2
+            else: # None-REM
+                labels = 1
+
+        elif self.classification_mode == 'LS-DS':
+            if labels == 0:
+                labels = 0
+            elif labels == 1 or labels == 2:
+                labels = 1
+            else:
+                labels = 2
+        signals = None
+        count = 0
+        
+        signals = np.load(self.signals_files_path[index])
+        signals = signals[self.use_channel,:]
+        
+
+        # for i in range(self.seq_size):
+        #     print(np.array_equal(signals[:,i*self.stride:(i*self.stride)+self.window_size],input_signals[i]))              
+
+        signals = np.array(signals)
+        if self.loader_mode:
+            if self.preprocessing:
+                for signal_index, current_method in enumerate(self.preprocessing_method):
+                    if current_method == 'permute':
+                        if signal_index == 0:
+                            signals1 = self.Transform.permute(signal=signals,pieces_size=self.permute_size)
+                        else:
+                            signals2 = self.Transform.permute(signal=signals,pieces_size=self.permute_size)
+                    elif current_method == 'crop':
+                        if signal_index == 0:
+                            signals1 = self.Transform.crop_resize(signal=signals,length=self.crop_size)
+                        else:
+                            signals1 = self.Transform.crop_resize(signal=signals,length=self.crop_size)
+                    elif current_method =='cutout':
+                        if signal_index == 0:
+                            signals1 = self.Transform.cutout_resize(signal=signals,length=self.cutout_size)
+                        else:
+                            signals2 = self.Transform.cutout_resize(signal=signals,length=self.cutout_size)
+
+        if self.use_cuda:
+            signals1 = torch.from_numpy(signals1).float()
+            signals2 = torch.from_numpy(signals2).float()
+        
+        return signals1, signals2, labels
         
     def __len__(self):
         return self.length 
